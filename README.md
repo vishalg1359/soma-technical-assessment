@@ -7,7 +7,7 @@ This is a technical assessment as part of the interview process for Soma Capital
 
 To begin, clone this repository to your local machine.
 
-## Development
+## Development 
 
 This is a [NextJS](https://nextjs.org) app, with a SQLite based backend, intended to be run with the LTS version of Node.
 
