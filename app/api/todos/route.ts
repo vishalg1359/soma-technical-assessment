@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseDueDateInput } from '@/lib/dates';
+import { requeueStalledImages, startImageResolution } from '@/lib/todo-images';
 
 export async function GET() {
   try {
@@ -9,6 +10,11 @@ export async function GET() {
         createdAt: 'desc',
       },
     });
+
+    // Pick up any image work this process lost to a restart. Deliberately not
+    // awaited: the list must not wait on Pexels.
+    void requeueStalledImages().catch((error) => console.error('[images] sweep failed', error));
+
     return NextResponse.json(todos);
   } catch (error) {
     return NextResponse.json({ error: 'Error fetching todos' }, { status: 500 });
@@ -40,6 +46,10 @@ export async function POST(request: Request) {
     const todo = await prisma.todo.create({
       data: { title: title.trim(), dueDate },
     });
+
+    // The task is already saved; its illustration arrives afterwards.
+    startImageResolution(todo.id, todo.title);
+
     return NextResponse.json(todo, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: 'Error creating todo' }, { status: 500 });
