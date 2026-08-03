@@ -16,7 +16,7 @@ const FRAME = 'relative w-28 h-20 shrink-0 rounded-md overflow-hidden';
 function Searching({ title }: { title: string }) {
   return (
     <div
-      className={`${FRAME} flex flex-col items-center justify-center gap-1 bg-gray-300 animate-pulse`}
+      className={`${FRAME} flex flex-col items-center justify-center gap-1 bg-gray-200 animate-pulse`}
       role="status"
       aria-label={`Finding an image for ${title}`}
     >
@@ -61,8 +61,8 @@ export default function TaskImage({ status, url, alt, credit, title }: Props) {
   if (status !== 'ready' || !url) return <NoImage />;
 
   return (
-    <div className={`${FRAME} bg-gray-300`} title={credit ? `Photo by ${credit} on Pexels` : undefined}>
-      {!loaded && <div className="absolute inset-0 animate-pulse bg-gray-300" aria-hidden />}
+    <div className={`${FRAME} bg-gray-200`} title={credit ? `Photo by ${credit} on Pexels` : undefined}>
+      {!loaded && <div className="absolute inset-0 animate-pulse bg-gray-200" aria-hidden />}
       <Image
         src={url}
         alt={alt ?? `Photo illustrating ${title}`}

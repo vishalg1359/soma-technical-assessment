@@ -120,10 +120,7 @@ export default function Home() {
     return map;
   }, [schedule]);
 
-  const titleById = useMemo(
-    () => new Map(todos.map((todo) => [todo.id, todo.title])),
-    [todos]
-  );
+  const titleById = useMemo(() => new Map(todos.map((todo) => [todo.id, todo.title])), [todos]);
 
   const edges = useMemo(
     () =>
@@ -198,113 +195,134 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-orange-500 to-red-500 flex flex-col items-center p-4">
-      <div className="w-full max-w-2xl">
-        <h1 className="text-4xl font-bold text-center text-white mb-8">Things To Do App</h1>
+    <main className="min-h-screen bg-gradient-to-b from-orange-500 to-red-500 p-4 py-10">
+      <div className="w-full max-w-2xl mx-auto">
+        <header className="mb-6 text-center">
+          <h1 className="text-4xl font-bold text-white">Things To Do App</h1>
+          <p className="text-sm text-white/80 mt-2">
+            {isLoading
+              ? 'Loading your tasks\u2026'
+              : todos.length === 0
+                ? 'Nothing planned yet.'
+                : `${todos.length} ${todos.length === 1 ? 'task' : 'tasks'}${
+                    schedule ? ` \u00b7 ${schedule.projectDuration} days of work` : ''
+                  }`}
+          </p>
+        </header>
 
-        <div className="flex mb-2">
-          <input
-            type="text"
-            className="flex-grow p-3 rounded-l-full focus:outline-none text-gray-700"
-            placeholder="Add a new todo"
-            value={newTodo}
-            onChange={(e) => setNewTodo(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddTodo()}
-          />
-          <button
-            onClick={handleAddTodo}
-            disabled={isAdding || !newTodo.trim()}
-            className="bg-white text-indigo-600 p-3 rounded-r-full hover:bg-gray-100 transition duration-300 disabled:opacity-60 disabled:cursor-not-allowed min-w-[5rem]"
-          >
-            {isAdding ? 'Adding\u2026' : 'Add'}
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3 mb-2 text-white">
-          <label htmlFor="due-date" className="text-sm">
-            Due date
-          </label>
-          <input
-            id="due-date"
-            type="date"
-            className="p-2 rounded text-gray-700"
-            value={newDueDate}
-            onChange={(e) => setNewDueDate(e.target.value)}
-          />
-          <label htmlFor="duration" className="text-sm">
-            Takes
-          </label>
-          <input
-            id="duration"
-            type="number"
-            min={0}
-            max={365}
-            className="p-2 rounded text-gray-700 w-20"
-            value={newDuration}
-            onChange={(e) => setNewDuration(e.target.value)}
-          />
-          <span className="text-sm">days</span>
-          {newDueDate && (
+        <section className="mb-6">
+          <div className="flex">
+            <label htmlFor="title" className="sr-only">
+              Task
+            </label>
+            <input
+              id="title"
+              type="text"
+              className="flex-grow rounded-l-full p-3 text-gray-700 placeholder:text-gray-400 focus:outline-none"
+              placeholder="Add a new todo"
+              value={newTodo}
+              onChange={(e) => setNewTodo(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddTodo()}
+            />
             <button
-              onClick={() => setNewDueDate('')}
-              className="text-sm underline opacity-80 hover:opacity-100"
+              onClick={handleAddTodo}
+              disabled={isAdding || !newTodo.trim()}
+              className="rounded-r-full bg-white p-3 font-medium text-indigo-600 transition duration-300 hover:bg-gray-100 disabled:cursor-not-allowed disabled:text-gray-400"
             >
-              Clear date
+              {isAdding ? 'Adding\u2026' : 'Add'}
             </button>
-          )}
-        </div>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg bg-white bg-opacity-15 px-4 py-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="due-date" className="text-sm text-white">
+                Due
+              </label>
+              <input
+                id="due-date"
+                type="date"
+                className="rounded-md px-2 py-1 text-sm text-gray-700 focus:outline-none"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label htmlFor="duration" className="text-sm text-white">
+                Takes
+              </label>
+              <input
+                id="duration"
+                type="number"
+                min={0}
+                max={365}
+                className="w-16 rounded-md px-2 py-1 text-sm text-gray-700 focus:outline-none"
+                value={newDuration}
+                onChange={(e) => setNewDuration(e.target.value)}
+              />
+              <span className="text-sm text-white">days</span>
+            </div>
+          </div>
+        </section>
 
         {!imagesEnabled && (
-          <p className="mb-4 text-sm text-white bg-black bg-opacity-20 rounded p-2">
+          <p className="mb-4 rounded-lg bg-white bg-opacity-15 px-3 py-2 text-sm text-white">
             Image search is off. Add <code>PEXELS_API_KEY</code> to <code>.env</code> and restart to
             illustrate your tasks.
           </p>
         )}
 
         {error && (
-          <p role="alert" className="mb-4 text-sm text-white bg-red-700 bg-opacity-80 rounded p-2">
+          <p
+            role="alert"
+            className="mb-4 rounded-lg bg-white px-3 py-2 text-sm font-medium text-red-600 shadow"
+          >
             {error}
           </p>
         )}
 
+        {schedule && schedule.criticalPath.length > 0 && (
+          <p className="mb-4 text-sm text-white/90">
+            Critical path:{' '}
+            <span className="font-semibold text-white">
+              {schedule.criticalPath.map((id) => titleById.get(id) ?? id).join(' \u2192 ')}
+            </span>{' '}
+            {'\u2014'} delaying any of these delays everything.
+          </p>
+        )}
+
         {schedule && schedule.tasks.length > 0 && (
-          <>
-            <p className="text-white text-sm mb-2">
-              Finishing everything takes <strong>{schedule.projectDuration} days</strong>. The
-              critical path is{' '}
-              <strong>
-                {schedule.criticalPath.map((id) => titleById.get(id) ?? id).join(' \u2192 ')}
-              </strong>
-              .
-            </p>
-            <DependencyGraph
-              tasks={schedule.tasks}
-              edges={edges}
-              criticalPath={schedule.criticalPath}
-            />
-          </>
+          <DependencyGraph
+            tasks={schedule.tasks}
+            edges={edges}
+            criticalPath={schedule.criticalPath}
+          />
         )}
 
         {isLoading && <TaskListSkeleton />}
 
         {!isLoading && todos.length === 0 && (
-          <p className="text-center text-white text-opacity-90 bg-white bg-opacity-10 rounded-lg p-6 mt-4">
-            Nothing to do yet. Add your first task above.
+          <p className="rounded-lg bg-white px-6 py-10 text-center text-sm text-gray-500 shadow-lg">
+            No tasks yet. Add your first one above.
           </p>
         )}
 
-        <ul className="mt-4">
+        <ul className="space-y-4">
           {todos.map((todo) => {
             const due = todo.dueDate ? getDueStatus(todo.dueDate, now) : null;
             const task = scheduleById.get(todo.id);
             const available = todos.filter(
-              (candidate) =>
-                candidate.id !== todo.id && !todo.dependencyIds.includes(candidate.id)
+              (candidate) => candidate.id !== todo.id && !todo.dependencyIds.includes(candidate.id)
             );
 
             return (
-              <li key={todo.id} className="bg-white bg-opacity-90 p-4 mb-4 rounded-lg shadow-lg">
-                <div className="flex items-center gap-3">
+              <li
+                key={todo.id}
+                className={`rounded-lg bg-white shadow-lg ${
+                  task?.missesDueDate ? 'ring-1 ring-red-400' : ''
+                }`}
+              >
+                <div className="flex items-start gap-3 p-4">
                   <TaskImage
                     status={todo.imageStatus}
                     url={todo.imageUrl}
@@ -313,11 +331,12 @@ export default function Home() {
                     title={todo.title}
                   />
 
-                  <div className="flex flex-col flex-grow min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-gray-800 break-words">{todo.title}</span>
+                  <div className="flex min-w-0 flex-grow flex-col gap-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="font-medium leading-snug text-gray-800">{todo.title}</h3>
+
                       {task?.isCritical && (
-                        <span className="text-[10px] uppercase tracking-wide bg-red-100 text-red-700 rounded px-1.5 py-0.5">
+                        <span className="shrink-0 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-red-600">
                           critical
                         </span>
                       )}
@@ -333,29 +352,29 @@ export default function Home() {
                     )}
 
                     {task && (
-                      <span className="text-xs text-gray-500">
-                        Takes {task.durationDays}d {'\u00b7'} can start{' '}
+                      <p className="text-xs text-gray-500">
+                        {task.durationDays}d estimate {'\u00b7'} can start{' '}
                         {task.earliestStart === 0
                           ? 'now'
                           : formatDueDate(dayOffsetToDate(task.earliestStart, now))}
                         {task.slack > 0 && ` \u00b7 ${task.slack}d slack`}
-                      </span>
+                      </p>
                     )}
 
                     {task?.missesDueDate && (
-                      <span className="text-xs text-red-600 font-medium">
-                        Cannot finish by its due date: earliest finish is{' '}
+                      <p className="text-xs font-medium text-red-600">
+                        Impossible deadline {'\u2014'} earliest finish is{' '}
                         {formatDueDate(dayOffsetToDate(task.earliestFinish, now))}
-                      </span>
+                      </p>
                     )}
                   </div>
 
                   <button
                     onClick={() => handleDeleteTodo(todo.id)}
-                    className="text-red-500 hover:text-red-700 transition duration-300 shrink-0"
+                    className="shrink-0 rounded-md p-1 text-red-500 transition duration-300 hover:text-red-700"
                     aria-label={`Delete ${todo.title}`}
                   >
-                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -366,8 +385,8 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-200">
-                  <span className="text-xs text-gray-500">Depends on</span>
+                <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 px-4 py-2">
+                  <span className="text-xs text-gray-400">Depends on</span>
 
                   {todo.dependencyIds.length === 0 && (
                     <span className="text-xs text-gray-400">nothing</span>
@@ -376,12 +395,12 @@ export default function Home() {
                   {todo.dependencyIds.map((dependencyId) => (
                     <span
                       key={dependencyId}
-                      className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 rounded-full pl-2 pr-1 py-0.5"
+                      className="inline-flex items-center gap-1 rounded-full bg-gray-100 py-0.5 pl-2 pr-1 text-xs text-gray-700"
                     >
                       {titleById.get(dependencyId) ?? `#${dependencyId}`}
                       <button
                         onClick={() => changeDependency(todo.id, dependencyId, 'DELETE')}
-                        className="text-gray-400 hover:text-red-600 px-1"
+                        className="px-1 text-gray-400 hover:text-red-600"
                         aria-label={`Remove dependency ${titleById.get(dependencyId) ?? dependencyId}`}
                       >
                         {'\u00d7'}
@@ -391,7 +410,7 @@ export default function Home() {
 
                   {available.length > 0 && (
                     <select
-                      className="text-xs border border-gray-300 rounded px-1 py-0.5 text-gray-700 ml-auto"
+                      className="ml-auto rounded-md border border-gray-200 bg-white px-1.5 py-0.5 text-xs text-gray-600 focus:outline-none"
                       value=""
                       aria-label={`Add a dependency to ${todo.title}`}
                       onChange={(e) => {
@@ -412,6 +431,6 @@ export default function Home() {
           })}
         </ul>
       </div>
-    </div>
+    </main>
   );
 }
