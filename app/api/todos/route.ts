@@ -3,19 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { parseDueDateInput } from '@/lib/dates';
 import { requeueStalledImages, startImageResolution } from '@/lib/todo-images';
 import { TodoWithDependencies } from '@/lib/types';
-
-const MAX_DURATION_DAYS = 365;
-
-function parseDurationInput(value: unknown): number {
-  if (value === null || value === undefined || value === '') return 1;
-
-  const duration = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(duration)) throw new Error('Duration must be a whole number of days');
-  if (duration < 0) throw new Error('Duration cannot be negative');
-  if (duration > MAX_DURATION_DAYS) throw new Error(`Duration cannot exceed ${MAX_DURATION_DAYS} days`);
-
-  return duration;
-}
+import { parseDurationInput, parseTitleInput } from '@/lib/validation';
 
 export async function GET() {
   try {
@@ -47,14 +35,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
-  const { title, dueDate: rawDueDate, durationDays: rawDuration } = body;
-  if (typeof title !== 'string' || title.trim() === '') {
-    return NextResponse.json({ error: 'Title is required' }, { status: 400 });
-  }
+  const { title: rawTitle, dueDate: rawDueDate, durationDays: rawDuration } = body;
 
+  let title: string;
   let dueDate: Date | null;
   let durationDays: number;
   try {
+    title = parseTitleInput(rawTitle);
     dueDate = parseDueDateInput(rawDueDate);
     durationDays = parseDurationInput(rawDuration);
   } catch (error) {
@@ -64,7 +51,7 @@ export async function POST(request: Request) {
 
   try {
     const todo = await prisma.todo.create({
-      data: { title: title.trim(), dueDate, durationDays },
+      data: { title, dueDate, durationDays },
     });
 
     // The task is already saved; its illustration arrives afterwards.

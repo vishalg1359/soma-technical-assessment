@@ -45,15 +45,29 @@ export async function POST(request: Request, context: Context) {
   try {
     await prisma.$transaction(async (tx) => {
       const todos = await tx.todo.findMany({
-        select: { id: true, title: true, durationDays: true, dependencies: { select: { dependencyId: true } } },
+        select: {
+          id: true,
+          title: true,
+          durationDays: true,
+          completed: true,
+          dependencies: { select: { dependencyId: true } },
+        },
       });
 
-      const known = new Set(todos.map((todo) => todo.id));
-      if (!known.has(dependentId) || !known.has(dependencyId)) {
+      const byId = new Map(todos.map((todo) => [todo.id, todo]));
+      const dependent = byId.get(dependentId);
+      const dependency = byId.get(dependencyId);
+      if (!dependent || !dependency) {
         throw new Error('NOT_FOUND');
       }
 
-      const graph: TaskNode[] = todos.map((todo) => ({
+      // Completion is gated on blockers being done, so an edge that would put a
+      // finished task behind unfinished work has to be refused here too.
+      if (dependent.completed && !dependency.completed) {
+        throw new Error('ALREADY_DONE');
+      }
+
+      const graph: TaskNode[] = todos.map((todo): TaskNode => ({
         id: todo.id,
         title: todo.title,
         durationDays: todo.durationDays,
@@ -69,6 +83,12 @@ export async function POST(request: Request, context: Context) {
   } catch (error) {
     if (error instanceof Error && error.message === 'NOT_FOUND') {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+    }
+    if (error instanceof Error && error.message === 'ALREADY_DONE') {
+      return NextResponse.json(
+        { error: 'That task is already finished \u2014 reopen it before adding a blocker' },
+        { status: 409 }
+      );
     }
     if (error instanceof Error && error.message === 'CYCLE') {
       return NextResponse.json(

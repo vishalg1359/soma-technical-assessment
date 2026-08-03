@@ -176,6 +176,68 @@ describe('computeSchedule', () => {
   });
 });
 
+describe('completion', () => {
+  const done = (node: TaskNode): TaskNode => ({ ...node, completed: true });
+
+  it('costs nothing once finished, so the project shrinks', () => {
+    const [one, two, three, four] = diamond;
+    // Task 2 is the 5-day bottleneck. Finishing it drops the project from 10
+    // days to 7: task 3 now waits only on task 1's two days.
+    const schedule = computeSchedule([one, done(two), three, four]);
+
+    expect(schedule.projectDuration).toBe(7);
+    expect(schedule.tasks.find((t) => t.id === 3)!.earliestStart).toBe(2);
+  });
+
+  it('moves the critical path onto whatever is still outstanding', () => {
+    const [one, two, three, four] = diamond;
+    const schedule = computeSchedule([one, done(two), three, four]);
+
+    // With the 5-day branch gone, the 2-day branch now determines the start.
+    expect(schedule.criticalPath).toEqual([1, 3, 4]);
+  });
+
+  it('walks the path through a finished task rather than splitting it', () => {
+    // 1(5) -> 2(4, done) -> 3(1): the chain is still one path even though its
+    // middle link is no longer outstanding.
+    const schedule = computeSchedule([task(1, 5), done(task(2, 4, [1])), task(3, 1, [2])]);
+
+    expect(schedule.criticalPath).toEqual([1, 2, 3]);
+    expect(schedule.tasks.filter((t) => t.isCritical).map((t) => t.id)).toEqual([1, 3]);
+  });
+
+  it('never marks a completed task critical, even with zero slack', () => {
+    const schedule = computeSchedule([done(task(1, 4))]);
+
+    expect(schedule.tasks[0].isCritical).toBe(false);
+    expect(schedule.criticalPath).toEqual([]);
+    expect(schedule.projectDuration).toBe(0);
+  });
+
+  it('stops flagging a missed deadline once the task is done', () => {
+    const start = new Date(2025, 0, 10, 12, 0, 0);
+    const overdue = task(1, 30, [], '2025-01-11');
+
+    expect(computeSchedule([overdue], start).tasks[0].missesDueDate).toBe(true);
+    expect(computeSchedule([done(overdue)], start).tasks[0].missesDueDate).toBe(false);
+  });
+
+  it('reports remaining days separately from the estimate', () => {
+    const [open, finished] = computeSchedule([task(1, 3), done(task(2, 3))]).tasks;
+
+    expect([open.durationDays, open.remainingDays]).toEqual([3, 3]);
+    expect([finished.durationDays, finished.remainingDays]).toEqual([3, 0]);
+  });
+
+  it('keeps dependents blocked behind an unfinished dependency', () => {
+    // Completing a *dependent* must not pull its dependency forward.
+    const schedule = computeSchedule([task(1, 4), done(task(2, 2, [1]))]);
+
+    expect(schedule.tasks.find((t) => t.id === 2)!.earliestStart).toBe(4);
+    expect(schedule.projectDuration).toBe(4);
+  });
+});
+
 describe('dayOffsetToDate', () => {
   // Offsets are anchored to the viewer's *local* calendar day, the same day
   // number due dates are compared against. These starts are therefore built in
