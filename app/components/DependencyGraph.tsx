@@ -47,11 +47,11 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
   );
 
   return (
-    <div className="bg-white bg-opacity-95 rounded-lg shadow-lg p-4 mb-4 overflow-x-auto">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="font-semibold text-gray-800">Dependency graph</h2>
+    <section className="rounded-lg bg-white shadow-lg p-4 mb-4 overflow-x-auto">
+      <div className="flex items-baseline justify-between mb-3">
+        <h2 className="text-sm font-semibold text-gray-800">Dependency graph</h2>
         <span className="text-xs text-gray-500">
-          <span className="inline-block w-3 h-[2px] bg-red-500 align-middle mr-1" />
+          <span className="inline-block w-3 h-[2px] bg-red-500 align-middle mr-1.5" />
           critical path
         </span>
       </div>
@@ -97,15 +97,15 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
               <rect
                 width={NODE_WIDTH}
                 height={NODE_HEIGHT}
-                rx={6}
+                rx={8}
                 fill={task.isCritical ? '#fef2f2' : '#f9fafb'}
                 stroke={task.isCritical ? '#ef4444' : '#d1d5db'}
-                strokeWidth={task.isCritical ? 2 : 1}
+                strokeWidth={task.isCritical ? 1.75 : 1}
               />
-              <text x={10} y={20} className="text-xs" fill="#111827" fontSize={12}>
+              <text x={12} y={21} fill="#111827" fontSize={12}>
                 {task.title.length > 20 ? `${task.title.slice(0, 19)}\u2026` : task.title}
               </text>
-              <text x={10} y={38} fill="#6b7280" fontSize={10}>
+              <text x={12} y={38} fill="#6b7280" fontSize={10}>
                 day {task.earliestStart}
                 {'\u2013'}
                 {task.earliestFinish}
@@ -115,6 +115,6 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
           );
         })}
       </svg>
-    </div>
+    </section>
   );
 }
