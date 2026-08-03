@@ -12,6 +12,7 @@ model Todo {
   title          String
   dueDate        DateTime?
   durationDays   Int       @default(1)
+  completed      Boolean   @default(false)
   imageUrl       String?
   imageAlt       String?
   imageCredit    String?

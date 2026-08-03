@@ -5,6 +5,7 @@ export interface TaskNode {
   title: string;
   durationDays: number;
   dueDate?: string | Date | null;
+  completed?: boolean;
   /** Ids this task depends on: each must finish before this one starts. */
   dependencyIds: number[];
 }
@@ -13,6 +14,9 @@ export interface ScheduledTask {
   id: number;
   title: string;
   durationDays: number;
+  completed: boolean;
+  /** Days of work left: zero once the task is done. */
+  remainingDays: number;
   /** Whole days from project start. Day 0 means "can start immediately". */
   earliestStart: number;
   earliestFinish: number;
@@ -43,6 +47,9 @@ export class CycleError extends Error {
 }
 
 const byId = (tasks: TaskNode[]) => new Map(tasks.map((task) => [task.id, task]));
+
+/** Finished work costs nothing: the schedule reflects what is actually left to do. */
+const remainingDays = (task: TaskNode) => (task.completed ? 0 : Math.max(0, task.durationDays));
 
 /**
  * Kahn's algorithm. Returns ids in an order where every dependency precedes its
@@ -151,7 +158,7 @@ export function computeSchedule(tasks: TaskNode[], projectStart: Date = new Date
   // Forward pass.
   for (const id of order) {
     const task = lookup.get(id)!;
-    const duration = Math.max(0, task.durationDays);
+    const duration = remainingDays(task);
 
     let start = 0;
     let layer = 0;
@@ -181,7 +188,7 @@ export function computeSchedule(tasks: TaskNode[], projectStart: Date = new Date
 
   for (const id of [...order].reverse()) {
     const task = lookup.get(id)!;
-    const duration = Math.max(0, task.durationDays);
+    const duration = remainingDays(task);
     const dependents = dependentsOf.get(id) ?? [];
 
     const finish =
@@ -203,14 +210,17 @@ export function computeSchedule(tasks: TaskNode[], projectStart: Date = new Date
       id,
       title: task.title,
       durationDays: task.durationDays,
+      completed: task.completed === true,
+      remainingDays: remainingDays(task),
       earliestStart: start,
       earliestFinish: finish,
       latestStart: latestStart.get(id)!,
       latestFinish: latestFinish.get(id)!,
       slack,
-      isCritical: slack === 0,
+      isCritical: slack === 0 && task.completed !== true,
       depth: depth.get(id)!,
-      missesDueDate: missesDueDate(task.dueDate, finish, projectStart),
+      missesDueDate:
+        task.completed !== true && missesDueDate(task.dueDate, finish, projectStart),
     };
   });
 
@@ -224,9 +234,13 @@ export function computeSchedule(tasks: TaskNode[], projectStart: Date = new Date
 /**
  * Zero slack marks every critical task, but those can form several parallel
  * chains. Walk one of them start-to-end so the UI can draw a single path.
+ *
+ * Completed tasks are walked through rather than badged: a finished task is no
+ * longer at risk, but it can still sit between two tasks that are, and dropping
+ * it would split one path into fragments.
  */
 function longestChain(scheduled: ScheduledTask[], lookup: Map<number, TaskNode>): number[] {
-  const critical = scheduled.filter((task) => task.isCritical);
+  const critical = scheduled.filter((task) => task.slack === 0);
   if (critical.length === 0) return [];
 
   const criticalIds = new Set(critical.map((task) => task.id));
@@ -253,7 +267,8 @@ function longestChain(scheduled: ScheduledTask[], lookup: Map<number, TaskNode>)
     current = previous;
   }
 
-  return path;
+  const outstanding = path.some((id) => !scheduled.find((task) => task.id === id)!.completed);
+  return outstanding ? path : [];
 }
 
 /** A deadline is impossible when the task cannot finish before it, even at full speed. */

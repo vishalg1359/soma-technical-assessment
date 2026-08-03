@@ -7,16 +7,20 @@ interface Props {
   criticalPath: number[];
 }
 
-const NODE_WIDTH = 150;
-const NODE_HEIGHT = 52;
-const COLUMN_GAP = 70;
-const ROW_GAP = 18;
+const NODE_WIDTH = 158;
+const NODE_HEIGHT = 54;
+const COLUMN_GAP = 72;
+const ROW_GAP = 16;
 const PADDING = 16;
 
+const CRITICAL = '#f59e0b';
+const EDGE = '#3b414f';
+
 /**
- * Layered DAG drawing. Tasks sit in the column matching their depth (which the
- * scheduler already computed via topological order), so every edge points
- * strictly left-to-right and no arrow ever travels backwards.
+ * Layered DAG drawing of the work that is left. Tasks sit in the column
+ * matching their depth (which the scheduler already computed via topological
+ * order), so every edge points strictly left-to-right and no arrow ever
+ * travels backwards.
  */
 export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
   if (tasks.length === 0) return null;
@@ -28,11 +32,19 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
     columns.set(task.depth, column);
   }
 
+  // Depths can have gaps once finished work is left out, so columns are ranked
+  // rather than indexed by depth -- otherwise the drawing keeps an empty lane.
+  const ranks = new Map(
+    Array.from(columns.keys())
+      .sort((a, b) => a - b)
+      .map((depth, rank) => [depth, rank])
+  );
+
   const positions = new Map<number, { x: number; y: number }>();
   columns.forEach((column, depth) => {
     column.forEach((task, row) => {
       positions.set(task.id, {
-        x: PADDING + depth * (NODE_WIDTH + COLUMN_GAP),
+        x: PADDING + ranks.get(depth)! * (NODE_WIDTH + COLUMN_GAP),
         y: PADDING + row * (NODE_HEIGHT + ROW_GAP),
       });
     });
@@ -47,22 +59,24 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
   );
 
   return (
-    <section className="rounded-lg bg-white shadow-lg p-4 mb-4 overflow-x-auto">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="text-sm font-semibold text-gray-800">Dependency graph</h2>
-        <span className="text-xs text-gray-500">
-          <span className="inline-block w-3 h-[2px] bg-red-500 align-middle mr-1.5" />
-          critical path
+    <section className="card mb-6 overflow-x-auto p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-sm font-medium">Dependency graph</h2>
+        <span className="flex items-center gap-3 text-[11px] text-[var(--ink-3)]">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-[2px] w-3" style={{ background: CRITICAL }} />
+            critical path
+          </span>
         </span>
       </div>
 
       <svg width={width} height={height} role="img" aria-label="Task dependency graph">
         <defs>
           <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L7,3 z" fill="#9ca3af" />
+            <path d="M0,0 L0,6 L7,3 z" fill={EDGE} />
           </marker>
           <marker id="arrow-critical" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-            <path d="M0,0 L0,6 L7,3 z" fill="#ef4444" />
+            <path d="M0,0 L0,6 L7,3 z" fill={CRITICAL} />
           </marker>
         </defs>
 
@@ -83,7 +97,7 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
               key={`${from}->${to}`}
               d={`M ${x1} ${y1} C ${midpoint} ${y1}, ${midpoint} ${y2}, ${x2} ${y2}`}
               fill="none"
-              stroke={critical ? '#ef4444' : '#9ca3af'}
+              stroke={critical ? CRITICAL : EDGE}
               strokeWidth={critical ? 2 : 1.25}
               markerEnd={`url(#${critical ? 'arrow-critical' : 'arrow'})`}
             />
@@ -92,24 +106,27 @@ export default function DependencyGraph({ tasks, edges, criticalPath }: Props) {
 
         {tasks.map((task) => {
           const position = positions.get(task.id)!;
+          const accent = task.isCritical ? CRITICAL : null;
+
           return (
             <g key={task.id} transform={`translate(${position.x}, ${position.y})`}>
               <rect
                 width={NODE_WIDTH}
                 height={NODE_HEIGHT}
                 rx={8}
-                fill={task.isCritical ? '#fef2f2' : '#f9fafb'}
-                stroke={task.isCritical ? '#ef4444' : '#d1d5db'}
-                strokeWidth={task.isCritical ? 1.75 : 1}
+                fill="#1b1e25"
+                stroke={accent ?? '#333844'}
+                strokeWidth={accent ? 1.5 : 1}
               />
-              <text x={12} y={21} fill="#111827" fontSize={12}>
+              {accent && <rect width={3} height={NODE_HEIGHT} rx={1.5} fill={accent} />}
+
+              <text x={14} y={22} fill="#e8eaef" fontSize={12}>
                 {task.title.length > 20 ? `${task.title.slice(0, 19)}\u2026` : task.title}
               </text>
-              <text x={12} y={38} fill="#6b7280" fontSize={10}>
-                day {task.earliestStart}
-                {'\u2013'}
-                {task.earliestFinish}
-                {task.slack > 0 ? ` \u00b7 ${task.slack}d slack` : ''}
+              <text x={14} y={39} fill="#6f7684" fontSize={10}>
+                {`day ${task.earliestStart}\u2013${task.earliestFinish}${
+                  task.slack > 0 ? ` \u00b7 ${task.slack}d slack` : ''
+                }`}
               </text>
             </g>
           );
