@@ -11,6 +11,7 @@ model Todo {
   id             Int       @id @default(autoincrement())
   title          String
   dueDate        DateTime?
+  durationDays   Int       @default(1)
   imageUrl       String?
   imageAlt       String?
   imageCredit    String?
@@ -18,5 +19,23 @@ model Todo {
   imageCheckedAt DateTime?
   createdAt      DateTime  @default(now())
 
+  // Self-referential many-to-many through an explicit join table: a task can
+  // depend on many others, and be depended on by many others.
+  dependencies TaskDependency[] @relation("dependent")
+  dependents   TaskDependency[] @relation("dependency")
+
   @@index([imageStatus])
+}
+
+/// One edge of the dependency DAG: `dependent` cannot start until `dependency`
+/// finishes.
+model TaskDependency {
+  dependentId  Int
+  dependencyId Int
+
+  dependent  Todo @relation("dependent", fields: [dependentId], references: [id], onDelete: Cascade)
+  dependency Todo @relation("dependency", fields: [dependencyId], references: [id], onDelete: Cascade)
+
+  @@id([dependentId, dependencyId])
+  @@index([dependencyId])
 }
