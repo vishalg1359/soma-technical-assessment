@@ -2,8 +2,9 @@ import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseDueDateInput } from '@/lib/dates';
+import { errorResponse, HttpError, readJsonBody } from '@/lib/http';
 import { startImageResolution } from '@/lib/todo-images';
-import { parseDurationInput, parseTitleInput } from '@/lib/validation';
+import { parseDurationInput, parseRouteId, parseTitleInput } from '@/lib/validation';
 
 interface Params {
   params: {
@@ -11,21 +12,26 @@ interface Params {
   };
 }
 
+
 /**
  * Partial update: only the keys actually present in the body are touched, so
  * ticking a checkbox can't blank a due date the user set in another tab.
  */
 export async function PATCH(request: Request, { params }: Params) {
-  const id = parseInt(params.id);
-  if (isNaN(id)) {
+  const id = parseRouteId(params.id);
+  if (id === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
 
   let body: Record<string, unknown>;
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    const parsed = await readJsonBody(request);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new HttpError(400, 'Expected a JSON object');
+    }
+    body = parsed as Record<string, unknown>;
+  } catch (error) {
+    return errorResponse(error, 'Invalid request body', 'PATCH /todos/[id]');
   }
 
   const data: Prisma.TodoUpdateInput = {};
@@ -47,63 +53,67 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   try {
-    const existing = await prisma.todo.findUnique({ where: { id }, select: { title: true } });
-    if (!existing) return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+    let renamed = false;
 
-    // Finishing work that is still blocked would make the schedule a lie: the
-    // dependency says this cannot even start yet. The button is disabled for
-    // the same reason, but the rule belongs here, where it cannot be skipped.
-    if (data.completed === true) {
-      const blockers = await prisma.taskDependency.findMany({
-        where: { dependentId: id, dependency: { completed: false } },
-        select: { dependency: { select: { title: true } } },
-      });
+    // Every completion rule is checked in the same transaction that writes, for
+    // the reason the dependency route does it: reading the blockers and then
+    // updating in a separate statement is check-then-write, and two concurrent
+    // requests -- one completing this task, one adding an open blocker to it --
+    // each see a state their own write invalidates. Both commit, and the result
+    // is a finished task sitting on unfinished work.
+    const todo = await prisma.$transaction(async (tx) => {
+      const existing = await tx.todo.findUnique({ where: { id }, select: { title: true } });
+      if (!existing) throw new HttpError(404, 'Todo not found');
 
-      if (blockers.length > 0) {
-        const [first] = blockers;
-        return NextResponse.json(
-          {
-            error:
-              blockers.length === 1
-                ? `Blocked by \u201c${first.dependency.title}\u201d \u2014 finish that first.`
-                : `Blocked by ${blockers.length} unfinished tasks.`,
-          },
-          { status: 409 }
-        );
+      // Finishing work that is still blocked would make the schedule a lie: the
+      // dependency says this cannot even start yet. The button is disabled for
+      // the same reason, but the rule belongs here, where it cannot be skipped.
+      if (data.completed === true) {
+        const blockers = await tx.taskDependency.findMany({
+          where: { dependentId: id, dependency: { completed: false } },
+          select: { dependency: { select: { title: true } } },
+        });
+
+        if (blockers.length > 0) {
+          const [first] = blockers;
+          throw new HttpError(
+            409,
+            blockers.length === 1
+              ? `Blocked by \u201c${first.dependency.title}\u201d \u2014 finish that first.`
+              : `Blocked by ${blockers.length} unfinished tasks.`
+          );
+        }
       }
-    }
 
-    // The mirror image: reopening work that something finished on top of would
-    // leave a completed task sitting on an unfinished blocker.
-    if (data.completed === false) {
-      const dependents = await prisma.taskDependency.findMany({
-        where: { dependencyId: id, dependent: { completed: true } },
-        select: { dependent: { select: { title: true } } },
-      });
+      // The mirror image: reopening work that something finished on top of would
+      // leave a completed task sitting on an unfinished blocker.
+      if (data.completed === false) {
+        const dependents = await tx.taskDependency.findMany({
+          where: { dependencyId: id, dependent: { completed: true } },
+          select: { dependent: { select: { title: true } } },
+        });
 
-      if (dependents.length > 0) {
-        const [first] = dependents;
-        return NextResponse.json(
-          {
-            error:
-              dependents.length === 1
-                ? `\u201c${first.dependent.title}\u201d was finished after this \u2014 reopen that first.`
-                : `${dependents.length} finished tasks depend on this \u2014 reopen those first.`,
-          },
-          { status: 409 }
-        );
+        if (dependents.length > 0) {
+          const [first] = dependents;
+          throw new HttpError(
+            409,
+            dependents.length === 1
+              ? `\u201c${first.dependent.title}\u201d was finished after this \u2014 reopen that first.`
+              : `${dependents.length} finished tasks depend on this \u2014 reopen those first.`
+          );
+        }
       }
-    }
 
-    // A renamed task's photo no longer illustrates it, so the search is re-run
-    // in the background exactly as it is on creation.
-    const renamed = typeof data.title === 'string' && data.title !== existing.title;
-    if (renamed) data.imageStatus = 'pending';
+      // A renamed task's photo no longer illustrates it, so the search is re-run
+      // in the background exactly as it is on creation.
+      renamed = typeof data.title === 'string' && data.title !== existing.title;
+      if (renamed) data.imageStatus = 'pending';
 
-    const todo = await prisma.todo.update({
-      where: { id },
-      data,
-      include: { dependencies: { select: { dependencyId: true } } },
+      return tx.todo.update({
+        where: { id },
+        data,
+        include: { dependencies: { select: { dependencyId: true } } },
+      });
     });
 
     if (renamed) startImageResolution(todo.id, todo.title);
@@ -114,13 +124,16 @@ export async function PATCH(request: Request, { params }: Params) {
       dependencyIds: dependencies.map((edge) => edge.dependencyId),
     });
   } catch (error) {
-    return NextResponse.json({ error: 'Error updating todo' }, { status: 500 });
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+    }
+    return errorResponse(error, 'Error updating todo', 'PATCH /todos/[id]');
   }
 }
 
 export async function DELETE(request: Request, { params }: Params) {
-  const id = parseInt(params.id);
-  if (isNaN(id)) {
+  const id = parseRouteId(params.id);
+  if (id === null) {
     return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
   }
 
@@ -130,6 +143,11 @@ export async function DELETE(request: Request, { params }: Params) {
     });
     return NextResponse.json({ message: 'Todo deleted' }, { status: 200 });
   } catch (error) {
-    return NextResponse.json({ error: 'Error deleting todo' }, { status: 500 });
+    // P2025: the row is not there. That is a 404, not a server fault -- and it
+    // is the expected answer when two tabs delete the same task.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      return NextResponse.json({ error: 'Todo not found' }, { status: 404 });
+    }
+    return errorResponse(error, 'Error deleting todo', 'DELETE /todos/[id]');
   }
 }

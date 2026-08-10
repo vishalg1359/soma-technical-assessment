@@ -14,6 +14,10 @@ import { useTodos } from './hooks/useTodos';
 
 const MINUTE_MS = 60 * 1000;
 
+// Shared empty arrays: a fresh `[]` per row is a new prop identity every render.
+const NO_BLOCKERS: string[] = [];
+const NO_CANDIDATES: TodoWithDependencies[] = [];
+
 const SORTS: Array<{ id: SortId; label: string }> = [
   { id: 'smart', label: 'Most urgent' },
   { id: 'due', label: 'Due date' },
@@ -161,15 +165,44 @@ export default function Home() {
   /**
    * Blockers that are still open, per task. A dependency that only moved a date
    * around would be a suggestion; this is what makes it a dependency.
+   *
+   * Built once per change instead of per row: every row needs its own list, and
+   * computing it during the render loop walks the task list once per task.
    */
-  const blockedBy = useCallback(
-    (todo: TodoWithDependencies) =>
-      todo.dependencyIds
-        .map((dependencyId) => todoById.get(dependencyId))
-        .filter((blocker) => blocker && !blocker.completed)
-        .map((blocker) => blocker!.title),
-    [todoById]
-  );
+  const blockedByTitles = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const todo of todos) {
+      const open: string[] = [];
+      for (const dependencyId of todo.dependencyIds) {
+        const blocker = todoById.get(dependencyId);
+        if (blocker && !blocker.completed) open.push(blocker.title);
+      }
+      map.set(todo.id, open);
+    }
+    return map;
+  }, [todos, todoById]);
+
+  /**
+   * Only the opened row offers a dropdown, so only the opened row needs the list
+   * of tasks it could depend on -- building one per row is the same scan
+   * repeated for every task on screen.
+   */
+  const expandedCandidates = useMemo(() => {
+    if (expandedId === null) return NO_CANDIDATES;
+    const todo = todoById.get(expandedId);
+    if (!todo || todo.completed) return NO_CANDIDATES;
+
+    const already = new Set(todo.dependencyIds);
+    return todos.filter(
+      (candidate) =>
+        // A task still being written has no id to point an edge at, and finished
+        // work cannot block anything: the edge would be satisfied on creation.
+        candidate.id > 0 &&
+        !candidate.completed &&
+        candidate.id !== todo.id &&
+        !already.has(candidate.id)
+    );
+  }, [expandedId, todoById, todos]);
 
   const toggleCompleted = useCallback(
     (id: number) => {
@@ -177,10 +210,10 @@ export default function Home() {
       if (!todo) return;
       // The API refuses this too, but the keyboard should not fire off a write
       // it already knows will come back 409.
-      if (!todo.completed && blockedBy(todo).length > 0) return;
+      if (!todo.completed && (blockedByTitles.get(id)?.length ?? 0) > 0) return;
       void updateTodo(id, { completed: !todo.completed }, { undo: true });
     },
-    [todoById, updateTodo, blockedBy]
+    [todoById, updateTodo, blockedByTitles]
   );
 
   useEffect(() => {
@@ -415,17 +448,8 @@ export default function Home() {
                   expanded={expandedId === todo.id}
                   editing={editingId === todo.id}
                   titleById={titleById}
-                  blockedBy={blockedBy(todo)}
-                  candidates={todos.filter(
-                    (candidate) =>
-                      // A task still being written has no id to point an edge
-                      // at, and finished work cannot block anything: the edge
-                      // would be satisfied the moment it was created.
-                      candidate.id > 0 &&
-                      !candidate.completed &&
-                      candidate.id !== todo.id &&
-                      !todo.dependencyIds.includes(candidate.id)
-                  )}
+                  blockedBy={blockedByTitles.get(todo.id) ?? NO_BLOCKERS}
+                  candidates={expandedId === todo.id ? expandedCandidates : NO_CANDIDATES}
                   onSelect={() => setSelectedId(todo.id)}
                   onToggleExpanded={() =>
                     setExpandedId((id) => (id === todo.id ? null : todo.id))

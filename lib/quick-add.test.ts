@@ -102,3 +102,44 @@ describe('dayOffsetToInput', () => {
     expect(dayOffsetToInput(7, new Date(2025, 2, 7, 12, 0, 0))).toBe('2025-03-14');
   });
 });
+
+describe('parseQuickAdd: words that only look like dates', () => {
+  // "sun", "sat", "wed" and "mon" are ordinary English before they are weekdays.
+  // Reading them as dates deletes a noun from the title and invents a deadline.
+  it.each([
+    ['buy sun cream', 'buy sun cream'],
+    ['monitor the sun', 'monitor the sun'],
+    ['sat with mom', 'sat with mom'],
+    ['wed the client', 'wed the client'],
+    ['mon the ramparts', 'mon the ramparts'],
+  ])('leaves %j alone', (input, title) => {
+    const parsed = parseQuickAdd(input, wednesday);
+
+    expect(parsed.title).toBe(title);
+    expect(parsed.dueDate).toBeNull();
+  });
+
+  it('still reads an abbreviation once a date word announces it', () => {
+    expect(parseQuickAdd('ship the build on fri', wednesday)).toMatchObject({
+      title: 'ship the build',
+      dueDate: '2025-06-13',
+    });
+    expect(parseQuickAdd('ship the build next fri', wednesday).dueDate).toBe('2025-06-13');
+  });
+
+  it('still reads a full weekday name on its own', () => {
+    expect(parseQuickAdd('ship the build friday', wednesday)).toMatchObject({
+      title: 'ship the build',
+      dueDate: '2025-06-13',
+    });
+  });
+
+  it('removes the occurrence that actually matched, not the first text like it', () => {
+    // "today" appears at index 0 inside "todays", where the pattern does not
+    // match. Cutting by text rather than by position carves up the wrong word.
+    const parsed = parseQuickAdd('todays today', wednesday);
+
+    expect(parsed.title).toBe('todays');
+    expect(parsed.dueDate).toBe('2025-06-11');
+  });
+});

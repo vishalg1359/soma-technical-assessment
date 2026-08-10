@@ -14,6 +14,21 @@ export type ImageStatus = (typeof IMAGE_STATUS)[keyof typeof IMAGE_STATUS];
 const STALE_AFTER_MS = 30_000;
 
 /**
+ * How often the sweep may actually touch the database.
+ *
+ * The list endpoint calls it on every read, and the client polls that endpoint
+ * every 1.5s while any image is outstanding -- so without a gate, reading the
+ * list is a write, forty times a minute per open tab. Nothing here is urgent:
+ * the work being reclaimed is already at least `STALE_AFTER_MS` old.
+ */
+const SWEEP_INTERVAL_MS = 15_000;
+
+/** How many stalled rows one sweep will pick up. */
+const SWEEP_BATCH = 10;
+
+let lastSweep = 0;
+
+/**
  * Resolve one task's illustration.
  *
  * The row is claimed with a conditional `updateMany` before any network call:
@@ -71,7 +86,11 @@ export function startImageResolution(todoId: number, query: string): void {
  * costs one indexed query.
  */
 export async function requeueStalledImages(): Promise<void> {
-  const cutoff = new Date(Date.now() - STALE_AFTER_MS);
+  const now = Date.now();
+  if (now - lastSweep < SWEEP_INTERVAL_MS) return;
+  lastSweep = now;
+
+  const cutoff = new Date(now - STALE_AFTER_MS);
 
   await prisma.todo.updateMany({
     where: { imageStatus: IMAGE_STATUS.resolving, imageCheckedAt: { lt: cutoff } },
@@ -81,10 +100,16 @@ export async function requeueStalledImages(): Promise<void> {
   const waiting = await prisma.todo.findMany({
     where: { imageStatus: IMAGE_STATUS.pending },
     select: { id: true, title: true },
-    take: 10,
+    take: SWEEP_BATCH,
   });
 
   for (const todo of waiting) {
     startImageResolution(todo.id, todo.title);
+  }
+
+  // A silent cap reads as "nothing left to do". Say when there is more, so a
+  // backlog shows up in the log instead of looking like a stuck queue.
+  if (waiting.length === SWEEP_BATCH) {
+    console.warn(`[images] swept ${SWEEP_BATCH} stalled tasks; more remain for the next sweep`);
   }
 }

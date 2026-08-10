@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseDueDateInput } from '@/lib/dates';
+import { errorResponse, HttpError, readJsonBody } from '@/lib/http';
 import { requeueStalledImages, startImageResolution } from '@/lib/todo-images';
 import { TodoWithDependencies } from '@/lib/types';
 import { parseDurationInput, parseTitleInput } from '@/lib/validation';
@@ -23,33 +24,33 @@ export async function GET() {
 
     return NextResponse.json(payload);
   } catch (error) {
-    return NextResponse.json({ error: 'Error fetching todos' }, { status: 500 });
+    return errorResponse(error, 'Error fetching todos', 'GET /todos');
   }
 }
 
 export async function POST(request: Request) {
-  let body: { title?: unknown; dueDate?: unknown; durationDays?: unknown };
   try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-  }
+    const body = await readJsonBody(request);
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw new HttpError(400, 'Expected a JSON object');
+    }
 
-  const { title: rawTitle, dueDate: rawDueDate, durationDays: rawDuration } = body;
+    const { title: rawTitle, dueDate: rawDueDate, durationDays: rawDuration } = body as Record<
+      string,
+      unknown
+    >;
 
-  let title: string;
-  let dueDate: Date | null;
-  let durationDays: number;
-  try {
-    title = parseTitleInput(rawTitle);
-    dueDate = parseDueDateInput(rawDueDate);
-    durationDays = parseDurationInput(rawDuration);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid input';
-    return NextResponse.json({ error: message }, { status: 400 });
-  }
+    let title: string;
+    let dueDate: Date | null;
+    let durationDays: number;
+    try {
+      title = parseTitleInput(rawTitle);
+      dueDate = parseDueDateInput(rawDueDate);
+      durationDays = parseDurationInput(rawDuration);
+    } catch (error) {
+      throw new HttpError(400, error instanceof Error ? error.message : 'Invalid input');
+    }
 
-  try {
     const todo = await prisma.todo.create({
       data: { title, dueDate, durationDays },
     });
@@ -59,6 +60,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ...todo, dependencyIds: [] }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: 'Error creating todo' }, { status: 500 });
+    return errorResponse(error, 'Error creating todo', 'POST /todos');
   }
 }

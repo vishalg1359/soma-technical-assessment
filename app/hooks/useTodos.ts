@@ -35,6 +35,7 @@ export function useTodos() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const nextPendingId = useRef(0);
   const { notify } = useToast();
 
   const reload = useCallback(async () => {
@@ -60,7 +61,10 @@ export function useTodos() {
     reload();
   }, [reload]);
 
-  // Poll only while an image search is still outstanding, then stop.
+  // Poll only while an image search is still outstanding, then stop. The timer
+  // deliberately outlives each render -- it is started and stopped by whether
+  // any image is still pending, not by the effect re-running -- so tearing it
+  // down belongs in an unmount-only effect rather than in this one's cleanup.
   useEffect(() => {
     const waiting = todos.some(isAwaitingImage);
 
@@ -71,14 +75,15 @@ export function useTodos() {
       clearInterval(pollTimer.current);
       pollTimer.current = null;
     }
-
-    return () => {
-      if (!waiting && pollTimer.current) {
-        clearInterval(pollTimer.current);
-        pollTimer.current = null;
-      }
-    };
   }, [todos, reload]);
+
+  useEffect(
+    () => () => {
+      if (pollTimer.current) clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    },
+    []
+  );
 
   const addTodo = useCallback(
     async (draft: TodoDraft): Promise<boolean> => {
@@ -86,7 +91,11 @@ export function useTodos() {
       // cannot collide with a real one, and is swapped for the saved task when
       // the server answers. Waiting on the round trip to show it is the
       // difference between a list and a form.
-      const pendingId = -Date.now();
+      //
+      // A counter, not a timestamp: two tasks added inside the same millisecond
+      // would share a `-Date.now()`, which collides as a React key and makes one
+      // server response replace both rows.
+      const pendingId = --nextPendingId.current;
       const pending: TodoWithDependencies = {
         id: pendingId,
         title: draft.title,
@@ -172,12 +181,21 @@ export function useTodos() {
   );
 
   /**
-   * Puts a deleted task back, blockers and all. It returns with a new id --
-   * nothing user-facing depends on the old one, and the alternative is a
-   * delete you cannot take back.
+   * Puts a deleted task back with the whole shape of its place in the graph:
+   * the blockers it waited on *and* the tasks that were waiting on it. Deleting
+   * cascades edges away in both directions, so restoring only the first kind
+   * hands back a task that no longer blocks anything -- the list looks right
+   * and the schedule is quietly wrong.
+   *
+   * It returns with a new id: nothing user-facing depends on the old one, and
+   * the alternative is a delete you cannot take back.
+   *
+   * Order matters. A completed task must be marked complete *before* the tasks
+   * it blocked are re-attached, because the API refuses an edge that would put
+   * a finished task behind unfinished work.
    */
   const restore = useCallback(
-    async (removed: TodoWithDependencies) => {
+    async (removed: TodoWithDependencies, dependentIds: number[]) => {
       try {
         const res = await fetch('/api/todos', {
           method: 'POST',
@@ -191,15 +209,17 @@ export function useTodos() {
         if (!res.ok) throw new Error('Request failed');
 
         const created: TodoWithDependencies = await res.json();
-        await Promise.all(
-          removed.dependencyIds.map((dependencyId) =>
-            fetch(`/api/todos/${created.id}/dependencies`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ dependencyId }),
-            })
-          )
+        const edge = (dependentId: number, dependencyId: number) =>
+          fetch(`/api/todos/${dependentId}/dependencies`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dependencyId }),
+          });
+
+        const blockers = await Promise.all(
+          removed.dependencyIds.map((dependencyId) => edge(created.id, dependencyId))
         );
+
         if (removed.completed) {
           await fetch(`/api/todos/${created.id}`, {
             method: 'PATCH',
@@ -207,7 +227,21 @@ export function useTodos() {
             body: JSON.stringify({ completed: true }),
           });
         }
+
+        const blocked = await Promise.all(
+          dependentIds.map((dependentId) => edge(dependentId, created.id))
+        );
+
         await reload();
+
+        // A task can be deleted while this is in flight, so a restore can come
+        // back incomplete. Say so rather than leaving a silently thinner graph.
+        const lost = [...blockers, ...blocked].filter((response) => !response.ok).length;
+        if (lost > 0) {
+          notify(`Restored \u201c${removed.title}\u201d, but ${lost} link could not be put back.`, {
+            tone: 'error',
+          });
+        }
       } catch {
         notify('Could not restore that task.', { tone: 'error' });
       }
@@ -219,6 +253,10 @@ export function useTodos() {
     async (id: number) => {
       const previous = todos;
       const removed = todos.find((todo) => todo.id === id);
+      // Captured before the delete: afterwards the cascade has erased them.
+      const dependentIds = todos
+        .filter((todo) => todo.dependencyIds.includes(id))
+        .map((todo) => todo.id);
       setTodos((current) => current.filter((todo) => todo.id !== id));
 
       try {
@@ -227,7 +265,7 @@ export function useTodos() {
 
         if (removed) {
           notify(`Deleted \u201c${removed.title}\u201d.`, {
-            action: { label: 'Undo', run: () => void restore(removed) },
+            action: { label: 'Undo', run: () => void restore(removed, dependentIds) },
           });
         }
         await reload();
@@ -239,8 +277,40 @@ export function useTodos() {
     [todos, notify, reload, restore]
   );
 
+  /**
+   * Optimistic like every other write. The whole schedule is derived from these
+   * ids on the client, so adding a blocker redraws the graph, the critical path
+   * and every start date on the spot -- and puts them all back if the server
+   * refuses the edge, which it does for cycles and for finished tasks.
+   */
   const changeDependency = useCallback(
     async (dependentId: number, dependencyId: number, method: 'POST' | 'DELETE') => {
+      const apply = (ids: number[]) =>
+        method === 'POST'
+          ? ids.includes(dependencyId)
+            ? ids
+            : [...ids, dependencyId]
+          : ids.filter((id) => id !== dependencyId);
+
+      let previous: number[] | undefined;
+      setTodos((current) =>
+        current.map((todo) => {
+          if (todo.id !== dependentId) return todo;
+          previous = todo.dependencyIds;
+          return { ...todo, dependencyIds: apply(todo.dependencyIds) };
+        })
+      );
+
+      const rollback = () => {
+        if (!previous) return;
+        const restored = previous;
+        setTodos((current) =>
+          current.map((todo) =>
+            todo.id === dependentId ? { ...todo, dependencyIds: restored } : todo
+          )
+        );
+      };
+
       try {
         const res = await fetch(`/api/todos/${dependentId}/dependencies`, {
           method,
@@ -248,15 +318,15 @@ export function useTodos() {
           body: JSON.stringify({ dependencyId }),
         });
         if (!res.ok) {
+          rollback();
           notify(await readError(res, 'Could not update dependencies.'), { tone: 'error' });
-          return;
         }
-        await reload();
       } catch {
+        rollback();
         notify('Could not update dependencies.', { tone: 'error' });
       }
     },
-    [notify, reload]
+    [notify]
   );
 
   return {

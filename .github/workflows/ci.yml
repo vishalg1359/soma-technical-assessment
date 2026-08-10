@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+env:
+  DATABASE_URL: file:./dev.db
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      - name: Types
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Unit tests across timezones
+        run: npm run test:timezones
+
+      - name: Build
+        run: npm run build
+
+      # The scheduling logic is pure and unit-tested, but the invariants that
+      # matter under load are only observable against a live server: two
+      # requests arriving together, each reading a state the other invalidates.
+      - name: Concurrency invariants
+        run: |
+          npx prisma migrate deploy
+          npm run start &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/api/todos >/dev/null && break
+            sleep 1
+          done
+          npm run test:concurrency

@@ -77,12 +77,26 @@ export function topologicalOrder(tasks: TaskNode[]): number[] {
     }
   }
 
-  // Sorted seed + sorted insertion keeps the output deterministic, which keeps
-  // the rendered graph from reshuffling between reads.
+  // Always taking the lowest ready id keeps the output deterministic, which
+  // keeps the rendered graph from reshuffling between reads. The ready set is
+  // held in ascending order and each newly freed task is placed by binary
+  // search -- re-sorting the whole queue on every pop would make this O(V² log V)
+  // for the sake of an ordering that only ever changes by one element.
   const queue = tasks
     .filter((task) => inDegree.get(task.id) === 0)
     .map((task) => task.id)
     .sort((a, b) => a - b);
+
+  const enqueue = (id: number) => {
+    let low = 0;
+    let high = queue.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (queue[mid] < id) low = mid + 1;
+      else high = mid;
+    }
+    queue.splice(low, 0, id);
+  };
 
   const order: number[] = [];
   while (queue.length > 0) {
@@ -92,13 +106,15 @@ export function topologicalOrder(tasks: TaskNode[]): number[] {
     for (const dependentId of dependents.get(id) ?? []) {
       const remaining = (inDegree.get(dependentId) ?? 0) - 1;
       inDegree.set(dependentId, remaining);
-      if (remaining === 0) queue.push(dependentId);
+      if (remaining === 0) enqueue(dependentId);
     }
-    queue.sort((a, b) => a - b);
   }
 
   if (order.length !== tasks.length) {
-    const stuck = tasks.filter((task) => !order.includes(task.id)).map((task) => task.id);
+    // A membership Set, not `order.includes` per task: on the error path the
+    // graph is already known to be large enough to have gone wrong.
+    const ordered = new Set(order);
+    const stuck = tasks.filter((task) => !ordered.has(task.id)).map((task) => task.id);
     throw new CycleError(stuck);
   }
 
@@ -173,7 +189,12 @@ export function computeSchedule(tasks: TaskNode[], projectStart: Date = new Date
     depth.set(id, layer);
   }
 
-  const projectDuration = Math.max(0, ...Array.from(earliestFinish.values(), (value) => value));
+  // Folded rather than spread: `Math.max(...values)` passes one argument per
+  // task and throws RangeError once a plan gets large.
+  let projectDuration = 0;
+  for (const finish of earliestFinish.values()) {
+    if (finish > projectDuration) projectDuration = finish;
+  }
 
   // Backward pass: a task with no dependents may finish as late as the project.
   const dependentsOf = new Map<number, number[]>(tasks.map((task) => [task.id, []]));
@@ -243,6 +264,9 @@ function longestChain(scheduled: ScheduledTask[], lookup: Map<number, TaskNode>)
   const critical = scheduled.filter((task) => task.slack === 0);
   if (critical.length === 0) return [];
 
+  // Indexed once. Walking the chain with `scheduled.find` re-scans the whole
+  // list at every step, which is quadratic in the length of the critical path.
+  const byTaskId = new Map(scheduled.map((task) => [task.id, task]));
   const criticalIds = new Set(critical.map((task) => task.id));
   const end = critical.reduce((latest, task) =>
     task.earliestFinish > latest.earliestFinish ? task : latest
@@ -259,7 +283,7 @@ function longestChain(scheduled: ScheduledTask[], lookup: Map<number, TaskNode>)
 
     // Follow the dependency that actually determined this task's start.
     const previous = dependencies
-      .map((id) => scheduled.find((task) => task.id === id)!)
+      .map((id) => byTaskId.get(id)!)
       .reduce((latest, task) => (task.earliestFinish > latest.earliestFinish ? task : latest));
 
     if (previous.earliestFinish !== current.earliestStart) break;
@@ -267,7 +291,7 @@ function longestChain(scheduled: ScheduledTask[], lookup: Map<number, TaskNode>)
     current = previous;
   }
 
-  const outstanding = path.some((id) => !scheduled.find((task) => task.id === id)!.completed);
+  const outstanding = path.some((id) => !byTaskId.get(id)!.completed);
   return outstanding ? path : [];
 }
 

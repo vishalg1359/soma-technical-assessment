@@ -47,10 +47,21 @@ const DUE_RULES: Array<{ pattern: RegExp; offset: (match: RegExpMatchArray, toda
   { pattern: /\bin (\d{1,3}) days?\b/i, offset: (match) => Number(match[1]) },
   { pattern: /\bin a week\b/i, offset: () => 7 },
   {
-    // "friday" / "fri" / "next friday" -- always the next occurrence, never today.
-    pattern: new RegExp(`\\b(?:next\\s+)?(${WEEKDAYS.map((day) => `${day}|${day.slice(0, 3)}`).join('|')})\\b`, 'i'),
+    // "friday" / "next friday" / "on fri" -- always the next occurrence, never today.
+    //
+    // Full weekday names stand alone, but the three-letter forms are ordinary
+    // English words -- "buy sun cream", "sat with mom", "wed the client" -- so
+    // they only count after a word that announces a date. Without that guard the
+    // parser eats the noun out of the title and silently invents a deadline.
+    pattern: new RegExp(
+      `\\b(?:` +
+        `(?:next|this|on|by|due)\\s+(${WEEKDAYS.map((day) => day.slice(0, 3)).join('|')})` +
+        `|(?:next\\s+|this\\s+|on\\s+|by\\s+)?(${WEEKDAYS.join('|')})` +
+        `)\\b`,
+      'i'
+    ),
     offset: (match, today) => {
-      const name = match[1].toLowerCase();
+      const name = (match[1] ?? match[2]).toLowerCase();
       const target = WEEKDAYS.findIndex((day) => day === name || day.slice(0, 3) === name);
       const ahead = (target - today.getDay() + 7) % 7;
       return ahead === 0 ? 7 : ahead;
@@ -92,6 +103,18 @@ const DURATION_RULE = /\b(?:takes\s+)?(\d{1,3})\s*(?:d\b|days?\b)/i;
  * rather than being guessed at, and every match is reported back so the UI can
  * show what it took.
  */
+/**
+ * Cut the matched span out by position.
+ *
+ * `replace(match[0], ' ')` would delete the *first* text equal to the match,
+ * which is not always the one that matched: "today is today" matches the second
+ * word and loses the first.
+ */
+function cut(text: string, match: RegExpMatchArray): string {
+  const start = match.index ?? text.indexOf(match[0]);
+  return `${text.slice(0, start)} ${text.slice(start + match[0].length)}`;
+}
+
 export function parseQuickAdd(input: string, today: Date = new Date()): QuickAdd {
   let rest = input;
   const matched: QuickAdd['matched'] = {};
@@ -109,7 +132,7 @@ export function parseQuickAdd(input: string, today: Date = new Date()): QuickAdd
 
     dueDate = dayOffsetToInput(offset, today);
     matched.due = match[0];
-    rest = rest.replace(match[0], ' ');
+    rest = cut(rest, match);
     break;
   }
 
@@ -119,7 +142,7 @@ export function parseQuickAdd(input: string, today: Date = new Date()): QuickAdd
     if (days > 0 && days <= 365) {
       durationDays = days;
       matched.duration = duration[0];
-      rest = rest.replace(duration[0], ' ');
+      rest = cut(rest, duration);
     }
   }
 
