@@ -60,7 +60,8 @@ A todo list that schedules itself.
 
 
 
-https://github.com/user-attachments/assets/b7c1d41b-25a8-4640-853f-019ec3ed41e2
+https://github.com/user-attachments/assets/9c1791fb-5e53-42d2-88eb-cb09ae5a1384
+
 
 
 
