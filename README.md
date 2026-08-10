@@ -59,7 +59,9 @@ Thanks for your time and effort. We'll be in touch soon!
 A todo list that schedules itself.
 
 
-https://github.com/user-attachments/assets/c083e2df-746f-4a63-841c-96aadecd8b5b
+
+https://github.com/user-attachments/assets/b7c1d41b-25a8-4640-853f-019ec3ed41e2
+
 
 
 Every task has a due date, an estimate in days, and whatever has to happen
