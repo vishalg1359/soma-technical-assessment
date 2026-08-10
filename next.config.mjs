@@ -1,5 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Dev and production builds get their own output directory. Sharing one means
+  // `npm run build` overwrites the chunks a running `npm run dev` is still
+  // serving, and the dev server dies with "Cannot find module './948.js'" --
+  // a confusing failure that looks like broken code and isn't.
+  distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
+
   poweredByHeader: false,
 
   images: {

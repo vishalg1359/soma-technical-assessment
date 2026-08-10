@@ -1,5 +1,6 @@
 node_modules
 .next
+.next-dev
 .DS_Store
 **/.DS_Store
 
