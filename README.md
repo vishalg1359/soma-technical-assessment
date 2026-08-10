@@ -113,6 +113,11 @@ inside the transaction that writes, for the same reason the cycle check is.
 
 ### The schedule
 
+Every task carries an estimate in days, defaulting to one. That isn't
+decoration: "the earliest this can start" has no answer as a *date* unless you
+know when its blockers finish, and a critical path is defined by duration. The
+estimate is what makes both of those computable.
+
 A forward and backward pass over the graph. Every task shows the real date it
 can start — after its *slowest* blocker, not its first — and how many days it
 can slip before it delays everything else. Zero slack is critical and gets
